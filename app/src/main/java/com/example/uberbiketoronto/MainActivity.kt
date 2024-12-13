@@ -5,10 +5,15 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.example.uberbiketoronto.data.Bike
 import com.example.uberbiketoronto.databinding.ActivityMainBinding
+import com.example.uberbiketoronto.ui.BikeDetailsFragment
+import com.example.uberbiketoronto.util.BikeDataInputs
+import com.example.uberbiketoronto.viewmodels.BikeViewModel
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
@@ -19,13 +24,13 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
-import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var googleMap: GoogleMap
-    private lateinit var firestore: FirebaseFirestore
+
+    private val bikeViewModel: BikeViewModel by viewModels()
 
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1
@@ -40,13 +45,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        firestore = FirebaseFirestore.getInstance()
-        binding.titleTextView.setOnClickListener{
-            BikeDataInputs(this).generateRandomBikeAndUpload()
-        }
-
         setupUI()
         setupMapFragment()
+        binding.titleTextView.setOnClickListener {
+            BikeDataInputs(this).generateRandomBikeAndUpload()
+        }
 
         if (!isLocationPermissionGranted()) {
             requestLocationPermission()
@@ -54,16 +57,24 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun setupUI() {
-        // Handle switch toggles for filtering
         binding.swIsReturned.setOnCheckedChangeListener { _, isChecked ->
             // Fetch and apply filter when switch toggles
-            fetchBikeLocations(isChecked)
-            setupRealTimeListener() // Update listener with new filter state
+            bikeViewModel.fetchBikeLocations(isChecked)
+            bikeViewModel.startRealTimeListener(isChecked) // Real-time updates with the new filter
         }
 
         // Default load: show not returned bikes
-        fetchBikeLocations(false)
-        setupRealTimeListener()
+        bikeViewModel.fetchBikeLocations(false)
+
+        // Observe LiveData for bike locations
+        bikeViewModel.bikeLocations.observe(this) { bikes ->
+            updateMapMarkers(bikes)
+        }
+
+        // Observe error message
+        bikeViewModel.errorMessage.observe(this) { message ->
+            showToast(message)
+        }
     }
 
     private fun setupMapFragment() {
@@ -73,21 +84,19 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
-
         configureMapDefaults()
-        setupRealTimeListener() // Start real-time updates
         drawMapGrid()
 
         googleMap.setOnMarkerClickListener { marker ->
             val bikeName = marker.title ?: "Unknown Bike"
             val bikeAddress = marker.snippet ?: "Unknown Address"
             showBikeDetails(bikeName, bikeAddress)
-            true // Return true to consume the click event
+            true
         }
     }
 
     private fun showBikeDetails(bikeName: String, bikeAddress: String) {
-        val bikeDetailsFragment = BikeDetailsFragment.newInstance(bikeName, bikeAddress)
+        val bikeDetailsFragment = BikeDetailsFragment.newInstance(bikeName, bikeAddress,)
         bikeDetailsFragment.show(supportFragmentManager, BikeDetailsFragment::class.java.simpleName)
     }
 
@@ -99,60 +108,31 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun fetchBikeLocations(showReturnedOnly: Boolean?) {
-        firestore.collection("bikes")
-            .get()
-            .addOnSuccessListener { documents ->
-                googleMap.clear()
-                drawMapGrid()
+    private fun updateMapMarkers(bikes: List<Bike>) {
+        googleMap.clear()
+        drawMapGrid()
 
-                if (documents.isEmpty) {
-                    showToast("No bikes available.")
-                    return@addOnSuccessListener
-                }
+        if (bikes.isEmpty()) {
+            showToast("No bikes available.")
+            return
+        }
 
-                val boundsBuilder = LatLngBounds.Builder()
-                var hasMarkers = false
+        val boundsBuilder = LatLngBounds.Builder()
+        bikes.forEach { bike ->
+            val location = LatLng(bike.latitude, bike.longitude)
+            val bitmapDescriptor = createBitmapDescriptor(R.drawable.bicycleorange)
+            googleMap.addMarker(
+                MarkerOptions()
+                    .position(location)
+                    .title(bike.bikeName)
+                    .snippet(bike.address)
+                    .icon(bitmapDescriptor)
+            )
+            boundsBuilder.include(location)
+        }
 
-                for (document in documents) {
-                    val latitude = document.getDouble("latitude") ?: continue
-                    val longitude = document.getDouble("longitude") ?: continue
-                    val isReturned = document.getBoolean("returned") ?: false
-                    val address = document.getString("address") ?: ""
-                    val name = document.getString("bikeName") ?: "BIKE"
-
-                    // Separate logic for filtering bikes
-                    when (showReturnedOnly) {
-                        true -> if (!isReturned) continue // Skip if not returned
-                        false -> if (isReturned) continue // Skip if returned
-                        null -> {} // No filter applied, show all bikes
-                    }
-
-                    val location = LatLng(latitude, longitude)
-                    val bitmapDescriptor = createBitmapDescriptor(R.drawable.bicycleorange)
-                    googleMap.addMarker(
-                        MarkerOptions()
-                            .position(location)
-                            .title(name)
-                            .snippet(address)
-                            .icon(bitmapDescriptor)
-                    )
-                    boundsBuilder.include(location)
-                    hasMarkers = true
-                }
-
-                if (hasMarkers) {
-                    adjustCameraToMarkers(boundsBuilder)
-                } else {
-                    showToast("No bikes to display with the current filter.")
-                }
-            }
-            .addOnFailureListener { exception ->
-                showToast("Failed to load bike locations: ${exception.message}")
-            }
+        adjustCameraToMarkers(boundsBuilder)
     }
-
-
 
     private fun adjustCameraToMarkers(boundsBuilder: LatLngBounds.Builder) {
         val bounds = boundsBuilder.build()
@@ -214,63 +194,4 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun showToast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
-
-    private fun setupRealTimeListener() {
-        firestore.collection("bikes")
-            .addSnapshotListener { snapshots, error ->
-                if (error != null) {
-                    showToast("Failed to listen for bike updates: ${error.message}")
-                    return@addSnapshotListener
-                }
-
-                if (snapshots == null || snapshots.isEmpty) {
-                    showToast("No bike locations found.")
-                    googleMap.clear()
-                    drawMapGrid()
-                    return@addSnapshotListener
-                }
-
-                // Get current filter state
-                val showReturnedOnly = binding.swIsReturned.isChecked
-
-                googleMap.clear()
-                drawMapGrid()
-                val boundsBuilder = LatLngBounds.Builder()
-                var hasMarkers = false
-
-                for (document in snapshots) {
-                    val latitude = document.getDouble("latitude") ?: continue
-                    val longitude = document.getDouble("longitude") ?: continue
-                    val isReturned = document.getBoolean("returned") ?: false
-                    val address = document.getString("address") ?: ""
-                    val name = document.getString("bikeName") ?: "BIKE"
-
-                    // Apply filter logic
-                    when (showReturnedOnly) {
-                        true -> if (!isReturned) continue // Skip if not returned
-                        false -> if (isReturned) continue // Skip if returned
-                    }
-
-                    val location = LatLng(latitude, longitude)
-                    val bitmapDescriptor = createBitmapDescriptor(R.drawable.bicycleorange)
-                    googleMap.addMarker(
-                        MarkerOptions()
-                            .position(location)
-                            .title(name)
-                            .snippet(address)
-                            .icon(bitmapDescriptor)
-                    )
-                    boundsBuilder.include(location)
-                    hasMarkers = true
-                }
-
-                if (hasMarkers) {
-                    adjustCameraToMarkers(boundsBuilder)
-                } else {
-                    showToast("No bikes to display with the current filter.")
-                }
-            }
-    }
-
-
 }

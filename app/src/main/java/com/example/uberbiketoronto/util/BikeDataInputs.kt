@@ -1,4 +1,4 @@
-package com.example.uberbiketoronto
+package com.example.uberbiketoronto.util
 
 
 
@@ -6,6 +6,7 @@ import android.content.Context
 import android.location.Address
 import android.location.Geocoder
 import android.util.Log
+import com.example.uberbiketoronto.data.Bike
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlin.random.Random
 

@@ -1,4 +1,4 @@
-package com.example.uberbiketoronto
+package com.example.uberbiketoronto.data
 
 import androidx.room.PrimaryKey
 import com.google.firebase.firestore.DocumentId
