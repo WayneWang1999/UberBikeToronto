@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "109932802218",
+    "project_id": "uberbiketoronto",
+    "storage_bucket": "uberbiketoronto.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:109932802218:android:53316d011428340f6120d3",
+        "android_client_info": {
+          "package_name": "com.example.uberbiketoronto"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCF2OPIfnHymAukICc5KwBMYC9muPgvozI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
